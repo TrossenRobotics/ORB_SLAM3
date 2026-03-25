@@ -35,7 +35,6 @@
 
 using namespace std;
 using nlohmann::json;
-const double MS_TO_S = 1e-3; ///< Milliseconds to second conversion
 
 void signal_callback_handler(int signum) {
    cout << "gopro_slam.cc Caught signal " << signum << endl;
@@ -45,7 +44,7 @@ void signal_callback_handler(int signum) {
 
 bool LoadTelemetry(const string &path_to_telemetry_file,
                    vector<double> &vTimeStamps,
-                   vector<double> &coriTimeStamps,
+                   vector<double> &camTimeStamps,
                    vector<cv::Point3f> &vAcc,
                    vector<cv::Point3f> &vGyro) {
 
@@ -56,19 +55,23 @@ bool LoadTelemetry(const string &path_to_telemetry_file,
     }
     json j;
     file >> j;
-    const auto accl = j["1"]["streams"]["ACCL"]["samples"];
-    const auto gyro = j["1"]["streams"]["GYRO"]["samples"];
-    const auto cori = j["1"]["streams"]["CORI"]["samples"];
+
+    // Parse the json file data
+    const auto accl_data = j["ACCL"]["data"];
+    const auto accl_ts = j["ACCL"]["timestamps_s"];
+    const auto gyro_data = j["GYRO"]["data"];
+    const auto gyro_ts = j["GYRO"]["timestamps_s"];
+    const auto cam_ts = j["img_timestamps_s"];
+
     std::map<double, cv::Point3f> sorted_acc;
     std::map<double, cv::Point3f> sorted_gyr;
 
-    for (const auto &e : accl) {
-      cv::Point3f v((float)e["value"][0], (float)e["value"][1], (float)e["value"][2]);
-      sorted_acc.insert(std::make_pair((double)e["cts"] * MS_TO_S, v));
+    for (size_t i = 0; i < accl_data.size(); i++) {
+        sorted_acc.insert({(double)accl_ts[i], {accl_data[i][0], accl_data[i][1], accl_data[i][2]}});
     }
-    for (const auto &e : gyro) {
-      cv::Point3f v((float)e["value"][0], (float)e["value"][1], (float)e["value"][2]);
-      sorted_gyr.insert(std::make_pair((double)e["cts"] * MS_TO_S, v));
+    
+    for (size_t i = 0; i < gyro_data.size(); i++) {
+        sorted_gyr.insert({(double)gyro_ts[i], {gyro_data[i][0], gyro_data[i][1], gyro_data[i][2]}});
     }
 
     double imu_start_t = sorted_acc.begin()->first;
@@ -79,8 +82,8 @@ bool LoadTelemetry(const string &path_to_telemetry_file,
     for (auto gyr : sorted_gyr) {
         vGyro.push_back(gyr.second);
     }
-    for (const auto &e : cori) {
-        coriTimeStamps.push_back((double)e["cts"] * MS_TO_S);
+    for (const auto &e : cam_ts) {
+        camTimeStamps.push_back((double)e - imu_start_t);
     }
 
     file.close();
@@ -103,7 +106,7 @@ int main(int argc, char **argv) {
   std::string vocabulary = "../../Vocabulary/ORBvoc.txt";
   app.add_option("-v,--vocabulary", vocabulary)->capture_default_str();
 
-  std::string setting = "gopro10_maxlens_fisheye_setting_v1.yaml";
+  std::string setting = "gopro13_maxlens_fisheye_setting_v1_720.yaml";
   app.add_option("-s,--setting", setting)->capture_default_str();
 
   std::string input_video;
@@ -170,8 +173,6 @@ int main(int argc, char **argv) {
   cv::Size img_size(fsSettings["Camera.width"],fsSettings["Camera.height"]);
   fsSettings.release();
 
-  vector<double> vTimestamps;
-
   // load mask image
   cv::Mat mask_img;
   if (!mask_img_path.empty()) {
@@ -203,20 +204,44 @@ int main(int argc, char **argv) {
   double fps = cap.get(cv::CAP_PROP_FPS);
   cout << "Video opened using backend " << cap.getBackendName() << endl;
   cout << "There are " << nImages << " frames in total" << endl;
-  cout << "video FPS " << fps << endl;
-  
+
+  // Subsample frames so each SLAM frame has >= MIN_IMU_PER_FRAME IMU samples.
+  // For GoPro 13 (IMU rate = 200 hz)
+  // slam_frame_skip = 1 for video fps < 66.67
+  // slam_frame_skip = 2 for video fps 66.67 < video_fps < 133.34
+  const double IMU_HZ = 200.0;          // GoPro 13 IMU sample rate (Hz)
+  const double MIN_IMU_PER_FRAME = 3.0; // minimum IMU samples required per SLAM frame
+  int slam_frame_skip = std::max(1, (int)std::ceil(fps / (IMU_HZ / MIN_IMU_PER_FRAME)));
+  double slam_fps = fps / slam_frame_skip;
+  cout << "Video: " << fps << " fps  |  SLAM: " << slam_fps << " fps (skip=" << slam_frame_skip << ")"
+       << "  |  IMU/frame: " << IMU_HZ / slam_fps << endl;
+
   std::vector<ORB_SLAM3::IMU::Point> vImuMeas;
   size_t last_imu_idx = 0;
   int n_lost_frames = 0;
   for (int frame_idx=0; frame_idx < nImages; frame_idx++){
-    double tframe = (double)frame_idx / fps;
+    double tframe = camTimestamps[frame_idx];
 
-    // read frame from video
+    // read frame from video, must happen every frame to keep video in sync
     cv::Mat im,im_track;
     bool success = cap.read(im);
     if (!success) {
       cout << "cap.read failed!" << endl;
       break;
+    }
+
+    // gather imu measurements between frames
+    while(last_imu_idx < imuTimestamps.size() && imuTimestamps[last_imu_idx] <= tframe && tframe > 0)
+    {
+        vImuMeas.push_back(ORB_SLAM3::IMU::Point(vAcc[last_imu_idx].x,vAcc[last_imu_idx].y,vAcc[last_imu_idx].z,
+                                                  vGyr[last_imu_idx].x,vGyr[last_imu_idx].y,vGyr[last_imu_idx].z,
+                                                  imuTimestamps[last_imu_idx]));
+        last_imu_idx++;
+    }
+
+    // Only process every nth frame; IMU is still accumulated above for all frames
+    if (frame_idx % slam_frame_skip != 0) {
+      continue;
     }
 
     // resize image and draw gripper mask
@@ -230,22 +255,12 @@ int main(int argc, char **argv) {
       im_track.setTo(cv::Scalar(0,0,0), mask_img);
     }
 
-    // gather imu measurements between frames
-    // Load imu measurements from previous frame
-    vImuMeas.clear();
-    while(imuTimestamps[last_imu_idx] <= tframe && tframe > 0)
-    {
-        vImuMeas.push_back(ORB_SLAM3::IMU::Point(vAcc[last_imu_idx].x,vAcc[last_imu_idx].y,vAcc[last_imu_idx].z,
-                                                  vGyr[last_imu_idx].x,vGyr[last_imu_idx].y,vGyr[last_imu_idx].z,
-                                                  imuTimestamps[last_imu_idx]));
-        last_imu_idx++;
-    }
-
     std::chrono::steady_clock::time_point t1 =
         std::chrono::steady_clock::now();
 
     // Pass the image to the SLAM system
     auto result = SLAM.LocalizeMonocular(im_track, tframe, vImuMeas);
+    vImuMeas.clear();
 
     // check lost frames
     if (! result.second){
@@ -266,8 +281,7 @@ int main(int argc, char **argv) {
             .count();
 
     if (frame_idx % 100 == 0) {
-      std::cout<<"Video FPS: "<<fps<<"\n";
-      std::cout<<"ORB-SLAM 3 running at: "<<1./ttrack<< " FPS\n";
+      std::cout << "ORB-SLAM3 processing at: " << 1./ttrack << " FPS  (frame " << frame_idx << "/" << nImages << ")\n";
     }
   }
 
