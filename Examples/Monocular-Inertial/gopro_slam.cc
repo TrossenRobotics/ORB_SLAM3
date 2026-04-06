@@ -57,11 +57,11 @@ bool LoadTelemetry(const string &path_to_telemetry_file,
     file >> j;
 
     // Parse the json file data
-    const auto accl_data = j["ACCL"]["data"];
-    const auto accl_ts = j["ACCL"]["timestamps_s"];
-    const auto gyro_data = j["GYRO"]["data"];
-    const auto gyro_ts = j["GYRO"]["timestamps_s"];
-    const auto cam_ts = j["img_timestamps_s"];
+    const auto &accl_data = j["ACCL"]["data"];
+    const auto &accl_ts = j["ACCL"]["timestamps_s"];
+    const auto &gyro_data = j["GYRO"]["data"];
+    const auto &gyro_ts = j["GYRO"]["timestamps_s"];
+    const auto &cam_ts = j["img_timestamps_s"];
 
     std::map<double, cv::Point3f> sorted_acc;
     std::map<double, cv::Point3f> sorted_gyr;
@@ -83,7 +83,7 @@ bool LoadTelemetry(const string &path_to_telemetry_file,
         vGyro.push_back(gyr.second);
     }
     for (const auto &e : cam_ts) {
-        camTimeStamps.push_back((double)e - imu_start_t);
+        camTimeStamps.push_back((double)e);
     }
 
     file.close();
@@ -162,8 +162,10 @@ int main(int argc, char **argv) {
   vector<double> imuTimestamps;
   vector<double> camTimestamps;
   vector<cv::Point3f> vAcc, vGyr;
-  LoadTelemetry(input_imu_json, imuTimestamps, camTimestamps, vAcc, vGyr);
-
+  if (!LoadTelemetry(input_imu_json, imuTimestamps, camTimestamps, vAcc, vGyr)) {
+    cerr << "Failed to load telemetry from: " << input_imu_json << endl;
+    return -1;
+  }
   // open setting to get image resolution
   cv::FileStorage fsSettings(setting, cv::FileStorage::READ);
   if(!fsSettings.isOpened()) {
@@ -211,6 +213,10 @@ int main(int argc, char **argv) {
   // slam_frame_skip = 2 for video fps 66.67 < video_fps < 133.34
   const double IMU_HZ = 200.0;          // GoPro 13 IMU sample rate (Hz)
   const double MIN_IMU_PER_FRAME = 3.0; // minimum IMU samples required per SLAM frame
+  if (fps <= 0.0) {
+    cerr << "Error: video FPS is invalid (" << fps << "). Cannot continue." << endl;
+    return -1;
+  }
   int slam_frame_skip = std::max(1, (int)std::ceil(fps / (IMU_HZ / MIN_IMU_PER_FRAME)));
   double slam_fps = fps / slam_frame_skip;
   cout << "Video: " << fps << " fps  |  SLAM: " << slam_fps << " fps (skip=" << slam_frame_skip << ")"
