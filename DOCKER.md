@@ -8,20 +8,22 @@ This document covers building the Docker image used by the
 - [Docker](https://docs.docker.com/get-started/get-docker/)
 - [Git](https://git-scm.com/)
 
-On Linux, the trumi pipeline calls `docker` without `sudo`. If you see a permission error,
-add your user to the `docker` group:
-
-```bash
-sudo groupadd docker
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-Verify it works without `sudo`:
+On Linux, the trumi pipeline calls `docker` without `sudo`. Verify this works first:
 
 ```bash
 docker run hello-world
 ```
+
+If you see a permission error, add your user to the `docker` group:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Then either log out and log back in, or run `newgrp docker` to apply the change in the current shell.
+Re-run `docker run hello-world` to confirm it works.
+
+> **Note:** Members of the `docker` group can run containers as root, which is equivalent to unrestricted `sudo` access. Only add trusted users.
 
 ## Setup
 
