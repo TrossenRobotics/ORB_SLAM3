@@ -30,6 +30,7 @@ Re-run `docker run hello-world` to confirm it works.
 **1. Clone the repository**
 
 ```bash
+cd ~
 git clone https://github.com/TrossenRobotics/ORB_SLAM3.git
 cd ORB_SLAM3
 ```
