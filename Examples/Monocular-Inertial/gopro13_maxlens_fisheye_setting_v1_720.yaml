@@ -1,0 +1,108 @@
+%YAML:1.0
+
+File.version: "1.0"
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters
+# Camera: GoPro 13 | Mode: MaxLens Fisheye | Resolution: 960x720 (downscaled from 2704x2028) | FPS: 120
+# Lens model: KannalaBrandt8 (FISHEYE)
+# Calibrated with OpenICC https://github.com/urbste/OpenImuCameraCalibrator at 2704x2028
+# image_downsample_factor=1 (full resolution), checker_size_m=0.02
+# Camera reprojection error: 0.636 px (from 35 views)
+# Spline fusion reprojection error: 2.68 px
+#
+# Intrinsics are the ORIGINAL 2704x2028 values.
+# Settings.cc auto-scales fx/fy/cx/cy by (960/2704) = 0.3550 when reading Camera.newWidth/newHeight.
+# k1-k4 distortion coefficients are scale-invariant (dimensionless) - unchanged.
+#--------------------------------------------------------------------------------------------
+Camera.type: "KannalaBrandt8"
+
+Camera1.fx: 948.1630791779313
+Camera1.fy: 948.1630791779313
+Camera1.cx: 1353.7889087271506
+Camera1.cy: 1008.9083953035882
+
+Camera1.k1: -0.05604379864061912
+Camera1.k2: -0.05997869385285432
+Camera1.k3:  0.06942827986877623
+Camera1.k4: -0.02866716147190332
+
+# Original calibration resolution
+Camera.width: 2704
+Camera.height: 2028
+
+# SLAM processing resolution
+Camera.newWidth: 960
+Camera.newHeight: 720
+
+# Camera frames per second
+# Must match the rate SLAM actually receives frames, not the source video fps.
+# gopro_slam.cc subsamples the video to keep >= 3 IMU samples/frame (IMU is 200 Hz),
+# which gives 60fps effective for a 120fps source. Keep this in sync with IMU_HZ
+# and MIN_IMU_PER_FRAME constants in gopro_slam.cc.
+Camera.fps: 60
+
+# Color order of the images (0: BGR, 1: RGB. It is ignored if images are grayscale)
+Camera.RGB: 1
+
+# Transformation from camera to imu (body frame)
+# calibrated with OpenICC https://github.com/urbste/OpenImuCameraCalibrator
+IMU.T_b_c1: !!opencv-matrix
+    rows: 4
+    cols: 4
+    dt: f
+# permuted calibration
+# perm_mat = np.array([
+# [0,0,1,0],
+# [1,0,0,0],
+# [0,1,0,0],
+# [0,0,0,1]
+# ])
+# mat = perm_mat @ open_cam_imu_tbc
+    data: [ -0.00806384, -0.99995215,  0.00553869, -0.00651331, -0.99991844,
+        0.00800847, -0.00994828, -0.00522210,  0.00990345, -0.00561846,
+       -0.99993518, -0.01038687,  0.        ,  0.        ,  0.        ,
+        1.        ]
+
+# IMU noise -> use OpenICC https://github.com/urbste/OpenImuCameraCalibrator
+IMU.NoiseGyro: 0.00181 # rad/s^0.5 
+IMU.NoiseAcc: 0.01754 # m/s^1.5
+IMU.GyroWalk: 2.58e-05 # rad/s^1.5
+IMU.AccWalk: 0.000629 # m/s^2.5
+IMU.Frequency: 200.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+# Tuned for 960x720 processing resolution
+#--------------------------------------------------------------------------------------------
+
+# Number of ORB features per image
+ORBextractor.nFeatures: 1250
+
+# Scale factor between pyramid levels
+ORBextractor.scaleFactor: 1.2
+
+# Number of pyramid levels
+# 960px / 1.2^8 = 258px at smallest level
+ORBextractor.nLevels: 8
+
+# FAST corner thresholds
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+System.thFarPoints: 20.0 # meters
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -3.5
+Viewer.ViewpointF: 500.0
+Viewer.imageViewScale: 1.0
